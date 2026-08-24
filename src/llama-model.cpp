@@ -1436,14 +1436,24 @@ bool llama_model_base::load_tensors(llama_model_loader & ml) {
         std::copy(tensor_split, tensor_split + n_devices(), splits.begin());
     }
 
-    // sum and normalize the splits to get the split points
+    // get the split points
+    // 1. sum the splits
     float split_sum = 0.0f;
     for (size_t i = 0; i < n_devices(); ++i) {
         split_sum += splits[i];
         splits[i] = split_sum;
     }
-    for (size_t i = 0; i < n_devices(); ++i) {
-        splits[i] /= split_sum;
+    if (split_sum > 0.0f) {
+        // 2a. normalize the splits to the range [0,1]
+        for (size_t i = 0; i < n_devices(); ++i) {
+            splits[i] /= split_sum;
+        }
+    } else {
+        // 2b. if all devices report zero free (i.e. anomalous Windows behavior), split evenly across all devices.
+        LLAMA_LOG_WARN("%s: devices report zero free memory, assigning 1/%zu to each device\n", __func__, n_devices());
+        for (size_t i = 0; i < n_devices(); ++i) {
+            splits[i] = (1.f + i) / n_devices();
+        }
     }
 
     const int i_gpu_start = std::max(n_layer_all + 1 - n_gpu_layers, 0);
